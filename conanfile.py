@@ -149,33 +149,70 @@ class BoostConan(ConanFile):
             b2_flags,
             tools.cpu_count(),
             without_python)  # -d2 is to print more debug info and avoid travis timing out without output
-        
+
         if self.settings.os == "Windows" and self.settings.compiler == "Visual Studio":
             full_command = "%s && %s" % (tools.vcvars_command(self.settings), full_command)
-      
+
         self.output.warn(full_command)
         self.run(full_command)
 
     def get_build_flags(self):
+        architecture = self.settings.get_safe('arch')
+
         flags = []
-        if self.settings.compiler == "Visual Studio":
-            flags.append("toolset=msvc-%s" % self._msvc_version())
-        elif not self.settings.os == "Windows" and self.settings.compiler == "gcc" and \
-                str(self.settings.compiler.version)[0] >= "5":
-            # For GCC >= v5 we only need the major otherwise Boost doesn't find the compiler
-            # The NOT windows check is necessary to exclude MinGW:
-            flags.append("toolset=%s-%s" % (self.settings.compiler,
-                                            str(self.settings.compiler.version)[0]))
-        elif str(self.settings.compiler) in ["clang", "gcc"]:
-            # For GCC < v5 and Clang we need to provide the entire version string
-            flags.append("toolset=%s-%s" % (self.settings.compiler,
-                                            str(self.settings.compiler.version)))
+
+        if tools.cross_building(self.settings) and architecture not in ['x86', 'x86_64']:
+            # We only need special instructions for non-x86 CPUs. Boost seems to handle x86 just fine without modding
+            # any jam files
+            assert os.path.exists(os.environ['CXX']), 'Cannot cross-compile without CXX environment variable'
+            assert os.path.isfile(os.environ['CXX']), 'CXX environment variable should point to a file (the cross ' \
+                                                      'compiler)'
+            cross_compiler = tools.which(os.environ['CXX'])
+            jam_filepath = os.path.join(self.source_folder, self.FOLDER_NAME, 'project-config.jam')
+            with open(jam_filepath, 'a') as jam_file:
+                jam_file.write('\nusing {0} : {1} : {2} ;'.format(
+                    self.settings.get_safe('compiler'),
+                    architecture,
+                    cross_compiler
+                ))
+            flags.append('toolset={0}-{1}'.format(self.settings.get_safe('compiler'), architecture))
+            flags.append('architecture=' + 'arm' if architecture.startswith('arm') else architecture)
+            flags.append('address-model=32')  # Let's just assume it's 32-bit... 64-bit is pretty rare outside of x86_64
+            if self.settings.get_safe('os').lower() == 'linux':
+                flags.append('binary-format=elf')
+            else:
+                raise Exception("I'm so sorry! I don't know the appropriate binary format for your architecture. :'(")
+            if architecture.startswith('arm'):
+                if 'hf' in architecture:
+                    flags.append('-mfloat-abi=hard')
+                flags.append('abi=aapcs')
+            else:
+                raise Exception("I'm so sorry! I don't know the appropriate ABI for your architecture. :'(")
+        else:
+            if self.settings.compiler == "Visual Studio":
+                flags.append("toolset=msvc-%s" % self._msvc_version())
+            elif not self.settings.os == "Windows" and self.settings.compiler == "gcc" and \
+                    str(self.settings.compiler.version)[0] >= "5":
+                # For GCC >= v5 we only need the major otherwise Boost doesn't find the compiler
+                # The NOT windows check is necessary to exclude MinGW:
+                flags.append("toolset=%s-%s" % (self.settings.compiler,
+                                                str(self.settings.compiler.version)[0]))
+            elif str(self.settings.compiler) in ["clang", "gcc"]:
+                # For GCC < v5 and Clang we need to provide the entire version string
+                flags.append("toolset=%s-%s" % (self.settings.compiler,
+                                                str(self.settings.compiler.version)))
+
+            if self.settings.compiler == "Visual Studio" and self.settings.compiler.runtime:
+                flags.append(
+                    "runtime-link=%s" % ("static" if "MT" in str(self.settings.compiler.runtime) else "shared"))
+
+        if architecture == 'x86':
+            flags.append('address-model=32')
+        elif architecture == 'x86_64':
+            flags.append('address-model=64')
 
         flags.append("link=%s" % ("static" if not self.options.shared else "shared"))
-        if self.settings.compiler == "Visual Studio" and self.settings.compiler.runtime:
-            flags.append("runtime-link=%s" % ("static" if "MT" in str(self.settings.compiler.runtime) else "shared"))
         flags.append("variant=%s" % str(self.settings.build_type).lower())
-        flags.append("address-model=%s" % ("32" if self.settings.arch == "x86" else "64"))
 
         option_names = {
             "--without-atomic": self.options.without_atomic,
