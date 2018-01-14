@@ -169,12 +169,16 @@ class BoostConan(ConanFile):
                                                       'compiler)'
             cross_compiler = tools.which(os.environ['CXX'])
             jam_filepath = os.path.join(self.source_folder, self.FOLDER_NAME, 'project-config.jam')
-            with open(jam_filepath, 'a') as jam_file:
-                jam_file.write('\nusing {0} : {1} : {2} ;'.format(
+            with open(jam_filepath, 'r+') as jam_file:
+                # Have to add it to the beginning fo the file or else Boost will try to load its own "gcc" toolset
+                # and potentially fail
+                original_content = jam_file.read()
+                jam_file.seek(0, 0)
+                jam_file.write('using {0} : {1} : {2} ;\n'.format(
                     self.settings.get_safe('compiler'),
                     architecture,
                     cross_compiler
-                ))
+                ) + original_content)
             flags.append('toolset={0}-{1}'.format(self.settings.get_safe('compiler'), architecture))
             flags.append('architecture=' + 'arm' if architecture.startswith('arm') else architecture)
             flags.append('address-model=32')  # Let's just assume it's 32-bit... 64-bit is pretty rare outside of x86_64
