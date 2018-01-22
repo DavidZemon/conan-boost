@@ -8,6 +8,8 @@ class DefaultNameConan(ConanFile):
     name = "DefaultName"
     version = "0.1"
     settings = "os", "compiler", "arch", "build_type"
+    options = {'shared': [True, False]}
+    default_options = 'shared=False'
     generators = "cmake"
 
     def configure(self):
@@ -26,8 +28,8 @@ class DefaultNameConan(ConanFile):
     def imports(self):
         self.copy(pattern="*.dll", dst="bin", src="bin")
         self.copy(pattern="*.dylib", dst="bin", src="lib")
-        
-    def test(self):        
+
+    def test(self):
         self.run('ctest --output-on-error')
         if self.options["Boost"].python:
             os.chdir("bin")
